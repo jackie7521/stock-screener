@@ -1,229 +1,201 @@
-# 🚀 部署到 Streamlit Cloud 完整教學
+# 部署完整教學（v2 - Google Sheet 版）
 
-> 從 GitHub 上傳到網頁上線，全程約 30 分鐘
-> 完全免費
+> 從零開始，照著做就能部署完成。預估時間 30-45 分鐘。
 
----
+## 📋 你需要準備
 
-## 📋 部署前準備清單
-
-需要的檔案（我已經幫你產好了）：
-
-```
-你的資料夾/
-├── stock_screener.py       ← 主程式
-├── requirements.txt        ← 套件清單
-├── .gitignore              ← 排除不上傳的檔案
-├── README.md               ← GitHub 首頁
-└── secrets.toml.example    ← Secrets 範例（這個會上傳）
-```
-
-⚠️ **注意**：`.streamlit/secrets.toml`（真實金鑰）**絕對不要上傳**，已被 `.gitignore` 排除。
+- GitHub 帳號（免費）
+- Google 帳號（免費）
+- Streamlit Community Cloud 帳號（免費，用 GitHub 登入）
 
 ---
 
-## 🎯 Step 1：建立 GitHub Repository（5 分鐘）
+## Step 1：建立 Google Sheet（5 分鐘）
 
-### 1-1 登入 GitHub
-打開 https://github.com 並登入
+1. 開啟 [Google Sheets](https://sheets.google.com/)，**新增一個空白試算表**
+2. 命名為「**股票資料**」（名稱隨意，自己記得就好）
+3. **新增 6 張工作表**，名稱必須完全一樣（區分大小寫）：
 
-### 1-2 建立新 Repo
-1. 右上角點 **「+」** → **「New repository」**
-2. 填寫：
-   - **Repository name**：`stock-screener`（或任何你想要的名字）
-   - **Description**：`隔日沖選股儀表板`（可選）
-   - **Public**（必選，Streamlit Cloud 免費版限定）
-   - ❌ **不要**勾「Add a README file」（我們有自己的）
-   - ❌ **不要**勾「Add .gitignore」（我們有自己的）
-3. 點 **「Create repository」**
+   | 工作表名 | 用途 |
+   |---|---|
+   | `daily_quotes` | 每日 K |
+   | `institutional` | 三大法人 |
+   | `market_index` | 加權指數 |
+   | `sector_index` | 類股指數 |
+   | `stock_info` | 公司基本資料 |
+   | `warning_stocks` | 注意股 |
 
-### 1-3 建好後你會看到一個空 repo 的指引頁
+   👉 不需要先填表頭，`fetch_daily.py` 第一次跑會自動建立。
 
----
-
-## 📤 Step 2：上傳檔案到 GitHub（10 分鐘）
-
-### 方法 A：用網頁拖曳上傳（最簡單，推薦新手）
-
-1. 在 repo 頁面點 **「uploading an existing file」** 連結
-   （或直接訪問 `https://github.com/你的帳號/stock-screener/upload/main`）
-2. 把這 5 個檔案**全部拖進去**：
-   - `stock_screener.py`
-   - `requirements.txt`
-   - `.gitignore`
-   - `README.md`
-   - `secrets.toml.example`
-3. 下方 **Commit changes** 區域：
-   - 填 commit message：`Initial commit`
-   - 點 **「Commit changes」**
-
-✅ 完成上傳，refresh 頁面就能看到所有檔案了
-
-### 方法 B：用 Git 指令（給之後想學的人）
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/你的帳號/stock-screener.git
-git branch -M main
-git push -u origin main
-```
-
----
-
-## ☁️ Step 3：註冊 Streamlit Cloud（5 分鐘）
-
-### 3-1 註冊
-1. 打開 https://share.streamlit.io
-2. 點 **「Continue with GitHub」**
-3. GitHub 會跳授權頁，點 **「Authorize streamlit」**
-
-### 3-2 第一次使用會問你一些問題
-- 用途：選 **「Personal project」**
-- 工作角色：隨便填
-- 點 **「Continue」**
-
----
-
-## 🚢 Step 4：部署你的 App（5 分鐘）
-
-### 4-1 建立新 App
-1. 進入 Streamlit Cloud 後，點右上角 **「Create app」** 或 **「New app」**
-2. 選 **「Deploy a public app from GitHub」**
-
-### 4-2 填寫設定
-| 欄位 | 填什麼 |
-|---|---|
-| **Repository** | `你的帳號/stock-screener` |
-| **Branch** | `main` |
-| **Main file path** | `stock_screener.py` |
-| **App URL** | 自訂網址（例：`my-stock-app`） |
-
-### 4-3 點 **「Deploy!」**
-
-等 2–5 分鐘，Streamlit Cloud 會：
-1. Clone 你的 repo
-2. 自動讀 `requirements.txt` 裝套件
-3. 執行 `stock_screener.py`
-4. 給你一個網址，例如：
+4. **取得 Sheet ID**：看網址：
    ```
-   https://my-stock-app.streamlit.app
+   https://docs.google.com/spreadsheets/d/【這串就是 Sheet ID】/edit
    ```
+   複製起來，等等會用到。**這就是 `SHEET_ID`**。
 
-✅ **完成！這個網址手機、平板都能打開**
+5. **取得每張工作表的 gid**：點到每張工作表時，網址後面會有 `#gid=xxxx`，記下來：
+   - daily_quotes → gid = ?
+   - institutional → gid = ?
+   - market_index → gid = ?
+   - sector_index → gid = ?
+   - stock_info → gid = ?
+   - warning_stocks → gid = ?
+
+6. **設為「知道連結的所有人皆可檢視」**
+   - 右上「共用」→ 一般存取權改成「知道連結的使用者」→ 角色「檢視者」
+   - 這樣 Streamlit 不用 auth 也能讀（資料都是公開股市資料，無隱私風險）
 
 ---
 
-## 🔐 Step 5（選用）：設定 Secrets
+## Step 2：建立 Google Service Account（寫入權限，10 分鐘）
 
-如果你之後升級 FinMind 付費版有 token，要這樣設定：
+GitHub Actions 要把資料寫進 Google Sheet，需要服務帳號。
 
-1. 在 Streamlit Cloud 找到你的 App
-2. 右下角點 **「⋮」**（三個點）→ **「Settings」**
-3. 左側選 **「Secrets」**
-4. 貼上：
+1. 開 [Google Cloud Console](https://console.cloud.google.com/)
+2. **建立新專案**（左上專案選擇 → 新增專案）→ 名稱「stock-screener」
+3. 啟用 API：
+   - 左側選單「API 和服務」→「程式庫」
+   - 搜尋「**Google Sheets API**」→ 啟用
+   - 搜尋「**Google Drive API**」→ 啟用
+4. 建立 Service Account：
+   - 左側「IAM 與管理員」→「服務帳戶」
+   - 點「+ 建立服務帳戶」→ 名稱「stock-bot」→ 建立
+   - 角色不用選，直接「完成」
+5. 建立金鑰：
+   - 進入剛建立的 service account → 上方「金鑰」分頁
+   - 「新增金鑰」→「建立新的金鑰」→ JSON → 下載
+   - **這個 JSON 檔保管好，不要 commit 到 GitHub**
+6. **複製 service account 的 email**（長得像 `stock-bot@xxx.iam.gserviceaccount.com`）
+7. 回到 Google Sheet 的「共用」→ 把這個 email 加入 → 角色「**編輯者**」
+
+---
+
+## Step 3：Fork 本 Repo 到自己的 GitHub（1 分鐘）
+
+1. 進 GitHub repo 頁面
+2. 右上「Fork」→ Fork 到自己的帳號
+3. 把 repo Clone 到本機（如果想本機跑），或直接在線上編輯
+
+---
+
+## Step 4：設定 GitHub Secrets（5 分鐘）
+
+GitHub Actions 跑排程時要讀 Secrets。
+
+1. 在自己 fork 的 repo 進「Settings」→「Secrets and variables」→「Actions」
+2. 點「New repository secret」分別新增兩個：
+
+   **Secret 1：`SHEET_ID`**
+   - Name: `SHEET_ID`
+   - Secret: 貼上 Step 1.4 那串 Sheet ID
+
+   **Secret 2：`GOOGLE_CREDENTIALS`**
+   - Name: `GOOGLE_CREDENTIALS`
+   - Secret: 把 Step 2.5 下載的 JSON **整個檔案的內容**（含大括號）貼進去
+
+---
+
+## Step 5：手動觸發第一次抓資料（3 分鐘）
+
+不用等到隔天 15:30，可以馬上觸發測試：
+
+1. 進 repo 上方「Actions」分頁
+2. 左側點「Daily Fetch (15:30 TPE)」
+3. 右上「Run workflow」→ 綠色按鈕
+4. 等 2-3 分鐘 → 點進剛跑的 run 看 log
+5. 看到 `✅ daily_quotes: 寫入 X 筆` 之類就成功了
+6. 回 Google Sheet 看，6 張表應該都有資料了
+
+如果看到錯誤：
+- `❌ 缺少環境變數` → Step 4 沒做完
+- API 抓取失敗 → 可能是非交易日（週末/假日），改週一晚上再試
+- 寫入失敗 → Service Account 沒加入 Sheet 共用清單（Step 2.7）
+
+**同樣的方式也手動跑一次「Weekly Fetch」**，把 `stock_info` 也建好。
+
+---
+
+## Step 6：部署到 Streamlit Cloud（5 分鐘）
+
+1. 進 https://share.streamlit.io/
+2. 用 GitHub 登入
+3. 「New app」→ 選擇 repo、branch（main）、主檔案填 `stock_screener.py`
+4. **點開「Advanced settings」→ Secrets 區塊**，貼入：
+
    ```toml
-   FINMIND_TOKEN = "你的真實 token"
+   SHEET_ID = "你的 Sheet ID"
+
+   [SHEET_GIDS]
+   daily_quotes = "0"
+   institutional = "111111111"
+   market_index = "222222222"
+   sector_index = "333333333"
+   stock_info = "444444444"
+   warning_stocks = "555555555"
    ```
-5. 點 **「Save」**
 
-App 會自動 reboot，3 秒內套用新 secrets。
+   👉 把上面每個 gid 替換成 Step 1.5 記下來的對應值
 
----
-
-## 🔄 Step 6：之後怎麼更新程式？
-
-### 方法 A：在 GitHub 網頁直接編輯
-1. 點要改的檔案（例如 `stock_screener.py`）
-2. 右上角點鉛筆圖示 ✏️
-3. 改完底下點 **「Commit changes」**
-4. **Streamlit Cloud 會自動偵測並重新部署**（約 1–2 分鐘）
-
-### 方法 B：本機改完用 Git push
-```bash
-git add .
-git commit -m "更新篩選邏輯"
-git push
-```
+5. 點「Deploy」→ 等 2-3 分鐘
+6. 部署完成後可以從手機開網址，新增到主畫面 = 一鍵打開選股結果
 
 ---
 
-## 🚨 常見問題排雷
+## Step 7：驗證（2 分鐘）
 
-### Q1：部署失敗，顯示 `ModuleNotFoundError`
-👉 檢查 `requirements.txt` 是否有上傳，套件名稱是否拼錯
+開啟你的 Streamlit 網址，應該看到：
 
-### Q2：部署成功但網頁打不開，顯示 `Error running app`
-👉 點右下角 **「Manage app」** 看 logs，通常是程式有錯誤
+- ✅ 標題「🚀 隔日沖選股儀表板」
+- ✅ 「📅 最新資料日期：YYYY-MM-DD　全市場 X,XXX 檔」
+- ✅ 大盤狀態顯示（紅 K / 黑 K）
+- ✅ 候選清單表格
 
-### Q3：FinMind 連線失敗
-👉 FinMind 免費版有 600 次/小時限制，等一小時再試；或註冊免費 token 拿到更高額度
-
-### Q4：可以改成 Private repo 嗎？
-👉 Streamlit Cloud 免費版只支援 Public repo。要 Private 要升級（$20/月）
-👉 替代方案：repo 設 Public，但**程式不要寫敏感資料**，金鑰全放 Secrets
-
-### Q5：App 會不會被亂操？
-👉 預設網址是公開的，但別人不知道網址就找不到
-👉 若擔心，可在程式裡加密碼登入（用 `st.text_input(type="password")`）
-
-### Q6：放著沒人用會不會自動關掉？
-👉 會！**閒置 7 天**會自動進入睡眠
-👉 重新打開網址會自動喚醒（等 30 秒），不影響資料
-
-### Q7：可以排程每天自動跑嗎？
-👉 Streamlit Cloud **本身不排程**，它只是「使用者打開時才跑」
-👉 要排程要搭配 **GitHub Actions**（免費）或 **cron-job.org**（免費）
-👉 這個進階版我可以幫你寫
+如果顯示「❌ 沒有資料」：
+- 檢查 Streamlit Cloud Secrets 是否設好
+- 檢查 Google Sheet 是否「知道連結的人皆可檢視」
+- 檢查 gid 是否填對
 
 ---
 
-## 🎁 加分技巧
+## 🎉 完成！日常使用流程
 
-### 技巧 1：自訂網址
-部署時 App URL 可填好記的名字，例如：
-- ❌ 隨機：`https://app-xj4k8.streamlit.app`
-- ✅ 自訂：`https://3zebra-stock.streamlit.app`
-
-### 技巧 2：加到手機桌面
-在手機瀏覽器打開網址 → 「加到主畫面」 → **變成像 App 一樣的圖示**
-
-### 技巧 3：分享給其他人
-直接傳網址給朋友，他們不用註冊任何東西就能用
-
-### 技巧 4：埋追蹤碼看使用情況
-可以接 Google Analytics 看誰在用、用多久（進階）
+- **不需要手動做什麼**，每天 15:30 GitHub Actions 自動抓
+- 盤後想看候選股 → 開網址 → 瞬間載入
+- 想調整篩選 → sidebar 拉一拉
+- 想下載清單 → 點 CSV 下載
 
 ---
 
-## 📊 部署後的下一步
+## 🛠️ 常見問題
 
-| 階段 | 動作 |
-|---|---|
-| 第 1 週 | 每天 15:30 打開網頁看候選清單 |
-| 第 2 週 | 對比實際隔日漲跌，調整參數 |
-| 第 1 個月 | 加入更多篩選條件（例如三大法人） |
-| 第 2 個月 | 接 Line Notify 自動推播 |
-| 第 3 個月 | 接 Shioaji 半自動下單 |
+### Q1：GitHub Actions 沒跑？
+- Actions 分頁看是否有顯示綠勾
+- 免費版 repo 60 天無活動會自動停掉排程 → push 個小修改即可重啟
+
+### Q2：上櫃股票沒出現？
+- TPEx API 偶爾欄位變動，看 `fetch_daily.py` log 是否抓到上櫃資料
+- 程式有寫 `try-except`，TPEx 失敗不影響上市
+
+### Q3：量比 / 連漲 / 突破前高都空白？
+- 第一次部署 → 沒有歷史資料 → 這些指標要累積後才會有值
+- 累積 1 週後「連漲」會有值
+- 累積 1 個月後「量比、突破前高」會穩定
+
+### Q4：想加自己的條件？
+- 改 `filters.py`（純函式）
+- 改 `stock_screener.py` 的 sidebar UI
+- 兩處改完就生效
+
+### Q5：Streamlit Cloud 免費版會睡眠？
+- 7 天無人開會休眠
+- 你每天會開所以不會發生
+- 醒來首次載入慢一點點，後續正常
 
 ---
 
-## ✅ 部署完成檢查表
+## 🔐 安全提醒
 
-完成後請依序確認：
-
-- [ ] GitHub repo 建好且檔案都上傳
-- [ ] `.streamlit/secrets.toml` **沒有**被上傳（檢查 repo 看不到）
-- [ ] Streamlit Cloud 部署成功，網址可開啟
-- [ ] 網頁能正常顯示候選清單
-- [ ] sidebar 滑桿可調整參數
-- [ ] CSV 下載按鈕能用
-- [ ] 手機開網址也能正常顯示
-- [ ] 網址加到手機桌面
-
----
-
-**祝部署順利！** 🚀
-
-有任何步驟卡住，把錯誤訊息截圖貼給我，幫你 debug。
+- ✅ Google Sheet 只放公開股市資料，設為公開檢視 OK
+- ✅ Service Account JSON 只在 GitHub Secrets，不要 commit
+- ❌ 不要把 Service Account JSON 上傳到 repo（已在 `.gitignore`）
+- ❌ 不要把任何含個資的東西放進 Google Sheet
