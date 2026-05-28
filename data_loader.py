@@ -72,6 +72,14 @@ def load_daily_quotes():
     if df.empty:
         return df
 
+    # 防禦性檢查：必要欄位是否存在（避免表頭錯位）
+    required = ["日期", "股號", "收盤", "開盤", "漲跌"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        st.error(f"❌ daily_quotes 缺少欄位 {missing}。請清空 Sheet 後重跑 Daily Fetch。")
+        st.caption(f"目前 CSV 欄位：{list(df.columns)}")
+        return pd.DataFrame()
+
     # 型別轉換
     num_cols = ["開盤", "最高", "最低", "收盤", "漲跌",
                 "成交量", "成交金額", "成交筆數"]
