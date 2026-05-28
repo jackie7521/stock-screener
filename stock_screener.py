@@ -1,20 +1,21 @@
 """
-隔日沖選股儀表板 (MVP 版本)
-================================
+隔日沖選股儀表板 (TWSE OpenAPI 版本)
+====================================
 使用方式：
-1. pip install streamlit pandas requests FinMind
+1. pip install streamlit pandas requests
 2. streamlit run stock_screener.py
 3. 瀏覽器會自動開啟 http://localhost:8501
 
-資料來源：FinMind (免費版)
+資料來源：證交所 (TWSE) + 櫃買中心 (TPEx) 官方 OpenAPI
+特色：免註冊、免 token、不會 ban IP
 作者：3ZeBra
 更新：2026/05/28
 """
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
-from FinMind.data import DataLoader
+import requests
+from datetime import datetime
 
 # ============================================================
 # 頁面設定
@@ -30,111 +31,130 @@ st.caption(f"資料更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 
 # ============================================================
-# 資料抓取（加 cache 避免重複呼叫 API）
+# 資料抓取
 # ============================================================
-@st.cache_data(ttl=3600)  # 快取 1 小時
-def load_stock_data(days_back=15):
-    """從 FinMind 抓取近 N 日的台股資料"""
-    api = DataLoader()
-    # 如果你有 FinMind 付費帳號，可在這裡填入 token
-    # api.login_by_token(api_token="你的TOKEN")
-
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-
-    # 抓取所有上市股票日線資料
-    df = api.taiwan_stock_daily(
-        stock_id="",  # 空字串代表全部
-        start_date=start_date,
-        end_date=end_date,
-    )
-    return df
+TWSE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+TPEX_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
 
 
-@st.cache_data(ttl=86400)  # 股本資料一天更新一次
-def load_stock_info():
-    """抓取股票基本資訊（含股本）"""
-    api = DataLoader()
-    df = api.taiwan_stock_info()
+@st.cache_data(ttl=3600)
+def fetch_twse_data():
+    """抓取上市股票資料"""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(TWSE_URL, headers=headers, timeout=30)
+    r.raise_for_status()
+    df = pd.DataFrame(r.json())
+    df["市場"] = "上市"
     return df
 
 
 @st.cache_data(ttl=3600)
-def load_institutional_investors(date):
-    """抓取三大法人買賣超"""
-    api = DataLoader()
-    df = api.taiwan_stock_institutional_investors(
-        start_date=date,
-        end_date=date,
-    )
+def fetch_tpex_data():
+    """抓取上櫃股票資料"""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(TPEX_URL, headers=headers, timeout=30)
+        r.raise_for_status()
+        df = pd.DataFrame(r.json())
+        df["市場"] = "上櫃"
+        return df
+    except Exception as e:
+        st.warning(f"⚠️ 上櫃資料抓取失敗（不影響上市資料）：{e}")
+        return pd.DataFrame()
+
+
+def normalize_data(twse_df, tpex_df):
+    """將兩個來源的資料統一格式"""
+    # TWSE 欄位
+    twse_cols = {
+        "Code": "股號",
+        "Name": "股名",
+        "TradeVolume": "成交量",
+        "TradeValue": "成交金額",
+        "OpeningPrice": "開盤",
+        "HighestPrice": "最高",
+        "LowestPrice": "最低",
+        "ClosingPrice": "收盤",
+        "Change": "漲跌",
+        "Transaction": "成交筆數",
+    }
+
+    twse = twse_df.rename(columns=twse_cols)[list(twse_cols.values()) + ["市場"]]
+
+    # TPEx 欄位（櫃買中心格式不太一樣）
+    if not tpex_df.empty:
+        # 嘗試不同的可能欄位名稱
+        tpex_col_map = {}
+        for orig, new in [
+            ("SecuritiesCompanyCode", "股號"),
+            ("CompanyName", "股名"),
+            ("TradingShares", "成交量"),
+            ("TransactionAmount", "成交金額"),
+            ("Open", "開盤"),
+            ("High", "最高"),
+            ("Low", "最低"),
+            ("Close", "收盤"),
+            ("Change", "漲跌"),
+            ("TransactionNumber", "成交筆數"),
+        ]:
+            if orig in tpex_df.columns:
+                tpex_col_map[orig] = new
+
+        tpex = tpex_df.rename(columns=tpex_col_map)
+        # 只保留有對應的欄位
+        keep_cols = [c for c in twse.columns if c in tpex.columns]
+        tpex = tpex[keep_cols]
+        df = pd.concat([twse, tpex], ignore_index=True)
+    else:
+        df = twse
+
+    # 轉換數值欄位
+    numeric_cols = ["成交量", "成交金額", "開盤", "最高", "最低", "收盤", "漲跌", "成交筆數"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # 計算漲幅 %
+    # 漲跌 = 今收 - 昨收，所以 昨收 = 今收 - 漲跌
+    df["昨收"] = df["收盤"] - df["漲跌"]
+    df["漲幅%"] = (df["漲跌"] / df["昨收"] * 100).round(2)
+
+    # 過濾無效資料
+    df = df.dropna(subset=["收盤", "成交量", "漲幅%"])
+    df = df[df["收盤"] > 0]
+
     return df
 
 
 # ============================================================
 # 篩選邏輯
 # ============================================================
-def calculate_screening_metrics(price_df, info_df):
-    """計算每檔股票的 5 大篩選指標"""
-    # 取得最新交易日
-    latest_date = price_df["date"].max()
-    today_data = price_df[price_df["date"] == latest_date].copy()
-
-    # 計算 5 日均量
-    avg_volume_5d = (
-        price_df.groupby("stock_id")["Trading_Volume"]
-        .rolling(window=5)
-        .mean()
-        .reset_index()
-        .rename(columns={"Trading_Volume": "avg_volume_5d"})
-    )
-    avg_volume_5d = avg_volume_5d.groupby("stock_id").tail(1)
-
-    # 合併資料
-    today_data = today_data.merge(
-        avg_volume_5d[["stock_id", "avg_volume_5d"]], on="stock_id", how="left"
-    )
-
-    # 計算量比
-    today_data["volume_ratio"] = (
-        today_data["Trading_Volume"] / today_data["avg_volume_5d"]
-    )
-
-    # 計算漲幅 %
-    today_data["change_pct"] = (
-        (today_data["close"] - today_data["open"]) / today_data["open"] * 100
-    )
-    # 更精確的漲幅應該用昨收計算，這裡簡化
-    today_data["change_pct"] = today_data["spread"] / today_data["open"] * 100
-
-    return today_data
-
-
-def apply_5_conditions(df, info_df, params):
+def apply_5_conditions(df, params):
     """套用 5 大條件並評分"""
     # 條件 1：漲幅 ≥ X%
-    df["cond_1_rise"] = (df["change_pct"] >= params["min_rise_pct"]).astype(int)
+    df["cond_1_rise"] = (df["漲幅%"] >= params["min_rise_pct"]).astype(int)
 
-    # 條件 2：量比 ≥ X 倍
-    df["cond_2_volume"] = (df["volume_ratio"] >= params["min_volume_ratio"]).astype(int)
+    # 條件 2：成交量 ≥ X 張（1 張 = 1000 股）
+    df["cond_2_volume"] = (df["成交量"] >= params["min_volume"] * 1000).astype(int)
 
-    # 條件 3：股本適中（需要 info_df）
-    # 註：FinMind 免費版股本資料有限，這裡用「上市」過濾代替
-    df["cond_3_size"] = 1  # 預設通過（需付費資料才能精確過濾）
+    # 條件 3：成交金額 ≥ X 元（避免雞蛋水餃股）
+    df["cond_3_turnover"] = (df["成交金額"] >= params["min_turnover"] * 10000).astype(int)
 
-    # 條件 4：成交金額過濾（避免雞蛋水餃股）
-    df["turnover"] = df["close"] * df["Trading_Volume"]
-    df["cond_4_turnover"] = (df["turnover"] >= params["min_turnover"]).astype(int)
+    # 條件 4：收紅 K（收盤 > 開盤）
+    df["cond_4_red_k"] = (df["收盤"] > df["開盤"]).astype(int)
 
-    # 條件 5：收紅 K（收盤 > 開盤）
-    df["cond_5_red_k"] = (df["close"] > df["open"]).astype(int)
+    # 條件 5：股價在合理區間（避免太低或太高）
+    df["cond_5_price"] = (
+        (df["收盤"] >= params["min_price"]) & (df["收盤"] <= params["max_price"])
+    ).astype(int)
 
     # 總分
     df["score"] = (
         df["cond_1_rise"]
         + df["cond_2_volume"]
-        + df["cond_3_size"]
-        + df["cond_4_turnover"]
-        + df["cond_5_red_k"]
+        + df["cond_3_turnover"]
+        + df["cond_4_red_k"]
+        + df["cond_5_price"]
     )
 
     return df
@@ -149,8 +169,12 @@ min_rise_pct = st.sidebar.slider(
     "最小漲幅 (%)", min_value=1.0, max_value=10.0, value=5.0, step=0.5
 )
 
-min_volume_ratio = st.sidebar.slider(
-    "最小量比（vs 5日均量）", min_value=1.0, max_value=5.0, value=1.5, step=0.1
+min_volume = st.sidebar.number_input(
+    "最小成交量（張）",
+    min_value=100,
+    max_value=100000,
+    value=1000,
+    step=100,
 )
 
 min_turnover = st.sidebar.number_input(
@@ -161,45 +185,56 @@ min_turnover = st.sidebar.number_input(
     step=1000,
 )
 
+min_price = st.sidebar.number_input("最低股價", min_value=1, max_value=1000, value=10)
+max_price = st.sidebar.number_input("最高股價", min_value=10, max_value=5000, value=500)
+
 min_score = st.sidebar.slider(
     "最低總分（5 分滿分）", min_value=1, max_value=5, value=4
 )
 
+market_filter = st.sidebar.multiselect(
+    "市場", options=["上市", "上櫃"], default=["上市", "上櫃"]
+)
+
 st.sidebar.markdown("---")
 st.sidebar.info("💡 預設條件適合大多數隔日沖情境，可依個人風格調整")
+st.sidebar.caption("📡 資料來源：證交所 + 櫃買中心官方 OpenAPI")
 
 
 # ============================================================
 # 主要內容
 # ============================================================
 try:
-    with st.spinner("📊 正在抓取資料..."):
-        price_df = load_stock_data()
-        info_df = load_stock_info()
+    with st.spinner("📊 正在從證交所抓取最新資料..."):
+        twse_df = fetch_twse_data()
+        tpex_df = fetch_tpex_data()
+        df = normalize_data(twse_df, tpex_df)
 
-    # 計算指標
-    today_metrics = calculate_screening_metrics(price_df, info_df)
+    # 套用市場篩選
+    df = df[df["市場"].isin(market_filter)]
 
-    # 套用篩選
+    # 套用條件
     params = {
         "min_rise_pct": min_rise_pct,
-        "min_volume_ratio": min_volume_ratio,
-        "min_turnover": min_turnover * 10000,  # 轉成元
+        "min_volume": min_volume,
+        "min_turnover": min_turnover,
+        "min_price": min_price,
+        "max_price": max_price,
     }
-    scored_df = apply_5_conditions(today_metrics, info_df, params)
+    scored_df = apply_5_conditions(df, params)
 
-    # 篩出符合條件的候選股
+    # 篩出候選股
     candidates = scored_df[scored_df["score"] >= min_score].copy()
     candidates = candidates.sort_values(
-        by=["score", "volume_ratio"], ascending=[False, False]
+        by=["score", "漲幅%", "成交金額"], ascending=[False, False, False]
     )
 
     # ====== 顯示統計 ======
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("📅 資料日期", price_df["date"].max())
-    col2.metric("📊 全市場檔數", len(today_metrics))
-    col3.metric("🎯 通過漲幅", (today_metrics["change_pct"] >= min_rise_pct).sum())
-    col4.metric("✅ 候選清單", len(candidates))
+    col1.metric("📊 全市場檔數", f"{len(df):,}")
+    col2.metric("🎯 通過漲幅", f"{(df['漲幅%'] >= min_rise_pct).sum():,}")
+    col3.metric("💰 通過成交金額", f"{(df['成交金額'] >= min_turnover * 10000).sum():,}")
+    col4.metric("✅ 候選清單", f"{len(candidates):,}")
 
     st.markdown("---")
 
@@ -207,39 +242,17 @@ try:
     st.subheader("🎯 隔日沖候選清單")
 
     if len(candidates) == 0:
-        st.warning("今日沒有符合條件的標的，可放寬條件再試")
+        st.warning("⚠️ 今日沒有符合條件的標的，可放寬條件再試")
     else:
-        # 加上股名（如果可以對應）
-        if "stock_name" in info_df.columns:
-            name_map = dict(zip(info_df["stock_id"], info_df["stock_name"]))
-            candidates["股名"] = candidates["stock_id"].map(name_map)
-
         display_cols = [
-            "stock_id",
-            "股名" if "股名" in candidates.columns else "stock_id",
-            "close",
-            "change_pct",
-            "Trading_Volume",
-            "volume_ratio",
-            "score",
+            "股號", "股名", "市場", "收盤", "漲幅%",
+            "成交量", "成交金額", "score"
         ]
-        display_cols = [c for c in display_cols if c in candidates.columns]
+        display_df = candidates[display_cols].rename(columns={"score": "總分"})
 
-        display_df = candidates[display_cols].copy()
-        display_df = display_df.rename(
-            columns={
-                "stock_id": "股號",
-                "close": "收盤價",
-                "change_pct": "漲幅%",
-                "Trading_Volume": "成交量",
-                "volume_ratio": "量比",
-                "score": "總分",
-            }
-        )
-
-        # 格式化
-        display_df["漲幅%"] = display_df["漲幅%"].round(2)
-        display_df["量比"] = display_df["量比"].round(2)
+        # 格式化顯示
+        display_df["成交量"] = (display_df["成交量"] / 1000).round(0).astype(int).astype(str) + " 張"
+        display_df["成交金額"] = (display_df["成交金額"] / 10000).round(0).astype(int).astype(str) + " 萬"
 
         st.dataframe(
             display_df,
@@ -249,7 +262,7 @@ try:
         )
 
         # 下載按鈕
-        csv = display_df.to_csv(index=False).encode("utf-8-sig")
+        csv = candidates.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="📥 下載候選清單 CSV",
             data=csv,
@@ -274,9 +287,9 @@ except Exception as e:
     st.error(f"❌ 資料載入失敗：{e}")
     st.info("""
     可能原因：
-    - FinMind 免費版有每日請求次數限制（600 次/小時）
-    - 網路連線問題
-    - 套件版本不符，請執行：`pip install -U FinMind streamlit pandas`
+    - 證交所 API 暫時無法連線
+    - 非交易日（週末或假日）資料未更新
+    - 請稍後重試
     """)
 
 
