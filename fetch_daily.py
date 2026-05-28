@@ -66,12 +66,23 @@ def get_gsheet():
 
 
 def get_or_create_ws(spreadsheet, title, headers):
-    """取得或新建工作表，並確保表頭存在。"""
+    """取得或新建工作表，並確保表頭存在（即使工作表是手動建立的空白表）。"""
     try:
         ws = spreadsheet.worksheet(title)
+        # 工作表存在 → 檢查表頭
+        first_row = ws.row_values(1)
+        if not first_row:
+            # A1 是空的 → 補上表頭
+            ws.append_row(headers)
+            print(f"  ℹ️ {title}: 補上表頭")
+        elif first_row != headers:
+            # 表頭存在但不一致 → 強制覆寫
+            ws.update(range_name="A1", values=[headers])
+            print(f"  ℹ️ {title}: 表頭已更新")
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=title, rows=1000, cols=len(headers))
         ws.append_row(headers)
+        print(f"  ℹ️ {title}: 已建立工作表")
     return ws
 
 

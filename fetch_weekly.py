@@ -114,6 +114,14 @@ def main():
 
     try:
         ws = ss.worksheet("stock_info")
+        # 確保表頭存在（即使工作表是手動建立的空白表）
+        first_row = ws.row_values(1)
+        if not first_row:
+            ws.append_row(INFO_HEADERS)
+            print("  ℹ️ stock_info: 補上表頭")
+        elif first_row != INFO_HEADERS:
+            ws.update(range_name="A1", values=[INFO_HEADERS])
+            print("  ℹ️ stock_info: 表頭已更新")
     except gspread.WorksheetNotFound:
         ws = ss.add_worksheet("stock_info", rows=3000, cols=len(INFO_HEADERS))
         ws.append_row(INFO_HEADERS)
