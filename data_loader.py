@@ -55,6 +55,7 @@ def _load_sheet(name, dtype=None):
     try:
         r = requests.get(url, timeout=30)
         r.raise_for_status()
+        r.encoding = "utf-8"  # 強制用 UTF-8 解碼（Google Sheets CSV 一律是 UTF-8）
         df = pd.read_csv(io.StringIO(r.text), dtype=dtype)
         return df
     except Exception as e:
