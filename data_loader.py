@@ -95,10 +95,13 @@ def load_daily_quotes():
     df["漲幅%"] = (df["漲跌"] / df["昨收"] * 100).round(2)
     df["紅K"] = df["收盤"] > df["開盤"]
 
-    # 上影線比例
-    rng = (df["最高"] - df["最低"]).replace(0, pd.NA)
-    upper_shadow = df["最高"] - df[["開盤", "收盤"]].max(axis=1)
-    df["上影線比例"] = (upper_shadow / rng).round(3)
+    # 上影線比例（用 float('nan') 避免 pd.NA 把 dtype 升級成 object）
+    if "最高" in df.columns and "最低" in df.columns:
+        rng = (df["最高"] - df["最低"]).replace(0, float("nan"))
+        upper_shadow = df["最高"] - df[["開盤", "收盤"]].max(axis=1)
+        df["上影線比例"] = (upper_shadow / rng).round(3)
+    else:
+        df["上影線比例"] = float("nan")
 
     df = df.dropna(subset=["收盤"])
     df = df[df["收盤"] > 0]
